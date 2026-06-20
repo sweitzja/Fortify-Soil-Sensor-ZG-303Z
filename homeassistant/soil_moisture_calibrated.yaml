@@ -1,0 +1,39 @@
+# Calibrated, battery-compensated soil moisture for the Fortify Soil-Moisture sensor.
+#
+# Add this under your top-level `template:` key in configuration.yaml
+# (merge into an existing `template:` list if you already have one), then
+# Developer Tools -> YAML -> "Template entities" reload (no restart needed).
+#
+# Entity IDs below are what ZHA generates for a "Fortify Soil-Moisture" device;
+# adjust the suffix if you have more than one.
+#
+# Calibration (do once, per probe type):
+#   1. In AIR/dry:   note ratio = raw_adc / adc_diode  -> this is `dry` (0%)
+#   2. In WATER/sat: note ratio = raw_adc / adc_diode  -> this is `wet` (100%)
+#   (ratio FALLS as it gets wetter). Replace the dry/wet values below.
+#
+# Optional refinements:
+#   - Non-linearity: capacitive probes bow in the middle. For a tighter fit,
+#     take a mid reading and use a polynomial instead of this 2-point line.
+#   - Temperature drift: the firmware does NOT temp-compensate. If you see drift,
+#     subtract a coefficient * (temperature - reference) from `ratio` before mapping.
+
+template:
+  - sensor:
+      - name: "Soil Moisture Calibrated"
+        unique_id: soil_moisture_calibrated
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:water-percent
+        state: >
+          {% set raw = states('sensor.fortify_soil_moisture_soil_raw_adc') | float(none) %}
+          {% set ref = states('sensor.fortify_soil_moisture_soil_adc_reference') | float(none) %}
+          {% if raw is none or ref is none or ref <= 0 %}
+          {{ none }}
+          {% else %}
+          {% set ratio = raw / ref %}
+          {% set dry = 0.562 %}   {# air, 0%  -- replace with your reading #}
+          {% set wet = 0.121 %}   {# water, 100% -- replace with your reading #}
+          {% set pct = (dry - ratio) / (dry - wet) * 100 %}
+          {{ [[pct, 0] | max, 100] | min | round(1) }}
+          {% endif %}

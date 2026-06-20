@@ -1,0 +1,100 @@
+diff --git a/src/app_EpCfg.c b/src/app_EpCfg.c
+index 7d801f4..fadfffb 100644
+--- a/src/app_EpCfg.c
++++ b/src/app_EpCfg.c
+@@ -407,6 +407,8 @@ zcl_MoistureAttr_t g_zcl_MoistureAttrs =
+ 	.minValue 		= 0,
+ 	.maxValue		= 9999,
+ 	.tolerance		= 0,
++	.raw_adc		= 0,
++	.adc_diode		= 0,
+ };
+ 
+ const zclAttrInfo_t relative_humdity_attrTbl2[] =
+@@ -416,6 +418,9 @@ const zclAttrInfo_t relative_humdity_attrTbl2[] =
+ 	{ ZCL_RELATIVE_HUMIDITY_ATTRID_MAXMEASUREDVALUE,    ZCL_DATA_TYPE_UINT16,    ACCESS_CONTROL_READ, (u8*)&g_zcl_MoistureAttrs.maxValue },
+ 	{ ZCL_RELATIVE_HUMIDITY_ATTRID_TOLERANCE,      		ZCL_DATA_TYPE_UINT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_REPORTABLE, (u8*)&g_zcl_MoistureAttrs.tolerance },
+ 
++	{ 0xF000,	ZCL_DATA_TYPE_UINT16,	ACCESS_CONTROL_READ | ACCESS_CONTROL_REPORTABLE, (u8*)&g_zcl_MoistureAttrs.raw_adc },
++	{ 0xF001,	ZCL_DATA_TYPE_UINT16,	ACCESS_CONTROL_READ | ACCESS_CONTROL_REPORTABLE, (u8*)&g_zcl_MoistureAttrs.adc_diode },
++
+ 	{ ZCL_ATTRID_GLOBAL_CLUSTER_REVISION, 	ZCL_DATA_TYPE_UINT16,  	ACCESS_CONTROL_READ,  						(u8*)&zcl_attr_global_clusterRevision},
+ };
+ #endif
+diff --git a/src/app_main.c b/src/app_main.c
+index 938385e..6a91160 100644
+--- a/src/app_main.c
++++ b/src/app_main.c
+@@ -642,6 +642,26 @@ void user_app_init(void)
+ 		REPORTABLE_SENSOR_TIMER_MAX_SEC,
+ 		(u8 *)&reportableChange
+ 	);
++    reportableChange = 10; // raw soil ADC counts
++	bdb_defaultReportingCfg(
++		SENSOR_DEVICE_ENDPOINT2,
++		HA_PROFILE_ID,
++		ZCL_CLUSTER_MS_RELATIVE_HUMIDITY,
++		0xF000,
++		REPORTABLE_SENSOR_TIMER_MIN_SEC,
++		600, // 10-min heartbeat even if unchanged
++		(u8 *)&reportableChange
++	);
++    reportableChange = 10; // diode reference ADC counts
++	bdb_defaultReportingCfg(
++		SENSOR_DEVICE_ENDPOINT2,
++		HA_PROFILE_ID,
++		ZCL_CLUSTER_MS_RELATIVE_HUMIDITY,
++		0xF001,
++		REPORTABLE_SENSOR_TIMER_MIN_SEC,
++		600, // 10-min heartbeat
++		(u8 *)&reportableChange
++	);
+ #endif
+ #ifdef ZCL_RELATIVE_HUMIDITY_MEASUREMENT
+     reportableChange = 50;
+diff --git a/src/app_main.h b/src/app_main.h
+index d4aab33..6658abe 100644
+--- a/src/app_main.h
++++ b/src/app_main.h
+@@ -120,6 +120,8 @@ typedef struct {
+ 	u16 minValue;
+ 	u16 maxValue;
+ 	u16 tolerance;
++	u16 raw_adc;    // raw soil-moisture ADC (x4), pre-curve
++	u16 adc_diode;  // diode/Vbat reference ADC (x4) for battery-compensated calibration
+ }zcl_MoistureAttr_t;
+ 
+ /**
+diff --git a/src/board_zg303z.h b/src/board_zg303z.h
+index 61ad026..c282c54 100644
+--- a/src/board_zg303z.h
++++ b/src/board_zg303z.h
+@@ -23,11 +23,11 @@
+  GPIO_PD4 - KEY
+ */
+ 
+-#define BLE_MODEL_STR		"ZG-303Z"
+-#define BLE_MAN_STR			"Sonoff"
++#define BLE_MODEL_STR		"Soil-Moisture"
++#define BLE_MAN_STR			"Fortify"
+ 
+-#define ZCL_BASIC_MFG_NAME     {6,'S','o','n','o','f','f'} // Sonoff
+-#define ZCL_BASIC_MODEL_ID	   {9,'Z','G','-','3','0','3','Z','-','z'} // ZY-ZG-303Z-z
++#define ZCL_BASIC_MFG_NAME     {7,'F','o','r','t','i','f','y'} // Fortify
++#define ZCL_BASIC_MODEL_ID	   {13,'S','o','i','l','-','M','o','i','s','t','u','r','e'} // Soil-Moisture
+ 
+ // Battery & RF Power
+ #define USE_BATTERY 	BATTERY_2AAA
+diff --git a/src/sensor_rh.c b/src/sensor_rh.c
+index 55f0010..5d28d66 100644
+--- a/src/sensor_rh.c
++++ b/src/sensor_rh.c
+@@ -135,6 +135,8 @@ int	read_rh_sensor(void) {
+ #endif
+ 	sensor_rh.rh = (u16)adc_uint;
+ 	g_zcl_MoistureAttrs.measuredValue = sensor_rh.rh;
++	g_zcl_MoistureAttrs.raw_adc = sensor_rh.adc_rh;   // raw soil ADC (x4)
++	g_zcl_MoistureAttrs.adc_diode = sensor_rh.adc_d;  // diode/Vbat reference (x4)
+ 	return 1;
+ }
+ 

@@ -1,0 +1,9 @@
+# build artifacts
+build/
+*.o
+*.elf
+*.lst
+*.bin
+# OS junk
+.DS_Store
+Thumbs.db
