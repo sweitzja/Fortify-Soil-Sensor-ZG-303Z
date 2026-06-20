@@ -11,6 +11,8 @@ This is a thin set of modifications on top of **[pvvx/ZigbeeTLc](https://github.
 
 > Everything here is licensed MIT, same as pvvx/ZigbeeTLc. All firmware credit goes to **pvvx**; this repo only adds the soil-ADC exposure, the identity change, and the HA glue.
 
+> 📖 **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)** — the detailed reference pvvx's docs lack: every entity, how the capacitive ADC actually works, and exactly where the averaging/windowing happens.
+
 ---
 
 ## Why expose raw ADC?
@@ -34,6 +36,8 @@ Direction: **wetter → lower `raw_adc`** (ratio falls as moisture rises).
 ## Repo layout
 
 ```
+docs/
+  HOW_IT_WORKS.md          # entities, ADC, and averaging explained in depth
 firmware/
   fortify_zg303z.patch     # the changes vs pvvx/ZigbeeTLc (git apply)
   src/                     # the 5 modified source files (drop-in replacements)
