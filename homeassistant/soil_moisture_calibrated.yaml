@@ -1,39 +1,65 @@
-# Calibrated, battery-compensated soil moisture for the Fortify Soil-Moisture sensor.
+# DIY calibrated, battery-compensated soil moisture for Fortify Soil-Moisture (ZG-303Z) sensors.
 #
-# Add this under your top-level `template:` key in configuration.yaml
-# (merge into an existing `template:` list if you already have one), then
-# Developer Tools -> YAML -> "Template entities" reload (no restart needed).
+# The firmware exposes a raw soil ADC (0xF000) and a battery-compensated ADC
+# reference / diode value (0xF001) on endpoint 2. We compute moisture ourselves
+# (like an ESPHome setup) instead of trusting the firmware's built-in curve:
 #
-# Entity IDs below are what ZHA generates for a "Fortify Soil-Moisture" device;
-# adjust the suffix if you have more than one.
+#     ratio = raw_adc / adc_reference        (ratio FALLS as it gets wetter)
+#     pct   = (dry - ratio) / (dry - wet) * 100      # clamped 0..100
 #
-# Calibration (do once, per probe type):
-#   1. In AIR/dry:   note ratio = raw_adc / adc_diode  -> this is `dry` (0%)
-#   2. In WATER/sat: note ratio = raw_adc / adc_diode  -> this is `wet` (100%)
-#   (ratio FALLS as it gets wetter). Replace the dry/wet values below.
+# Add this under your top-level `template:` key (merge into an existing list if
+# you already have one), then Developer Tools -> Actions -> "template.reload"
+# (no restart needed).
 #
-# Optional refinements:
-#   - Non-linearity: capacitive probes bow in the middle. For a tighter fit,
-#     take a mid reading and use a polynomial instead of this 2-point line.
-#   - Temperature drift: the firmware does NOT temp-compensate. If you see drift,
-#     subtract a coefficient * (temperature - reference) from `ratio` before mapping.
+# One template sensor per physical sensor. The ADC source entities use STABLE
+# entity_ids (sensor.soil_<id>_raw_adc / _adc_ref) that you assign in the entity
+# registry, so they don't shuffle when devices re-pair or HA restarts.
+#
+# After pairing a NEW sensor:
+#   1. Run relabel_fortify_humidity.py to label its Air/Soil humidity entities.
+#   2. Rename its raw_adc / adc_reference entities to stable ids (e.g. soil_<id>_raw_adc).
+#   3. Copy a block below, point it at those ids, and template.reload.
+#
+# Calibration (per probe): read `ratio` fully dry/in-air -> that's `dry` (0%);
+# saturated/in-water -> that's `wet` (100%). Values below are for the original
+# "OG" probe; other probes are similar but worth re-checking.
+# Refinements: capacitive probes bow in the middle (a mid reading + polynomial
+# fits tighter), and the firmware does not temperature-compensate.
 
 template:
   - sensor:
-      - name: "Soil Moisture Calibrated"
+      - name: "Soil Moisture Calibrated (OG)"
         unique_id: soil_moisture_calibrated
         unit_of_measurement: "%"
         state_class: measurement
         icon: mdi:water-percent
         state: >
-          {% set raw = states('sensor.fortify_soil_moisture_soil_raw_adc') | float(none) %}
-          {% set ref = states('sensor.fortify_soil_moisture_soil_adc_reference') | float(none) %}
+          {% set raw = states('sensor.soil_og_raw_adc') | float(none) %}
+          {% set ref = states('sensor.soil_og_adc_ref') | float(none) %}
           {% if raw is none or ref is none or ref <= 0 %}
           {{ none }}
           {% else %}
           {% set ratio = raw / ref %}
           {% set dry = 0.562 %}   {# air, 0%  -- replace with your reading #}
           {% set wet = 0.121 %}   {# water, 100% -- replace with your reading #}
+          {% set pct = (dry - ratio) / (dry - wet) * 100 %}
+          {{ [[pct, 0] | max, 100] | min | round(1) }}
+          {% endif %}
+
+      - name: "Soil Moisture Calibrated (Fortify 3)"
+        unique_id: soil_moisture_calibrated_f3
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:water-percent
+        state: >
+          {% set raw = states('sensor.soil_f3_raw_adc') | float(none) %}
+          {% set ref = states('sensor.soil_f3_adc_ref') | float(none) %}
+          {% if raw is none or ref is none or ref <= 0 %}
+          {{ none }}
+          {% else %}
+          {% set ratio = raw / ref %}
+          {% set dry = 0.562 %}
+          {% set wet = 0.121 %}
           {% set pct = (dry - ratio) / (dry - wet) * 100 %}
           {{ [[pct, 0] | max, 100] | min | round(1) }}
           {% endif %}
