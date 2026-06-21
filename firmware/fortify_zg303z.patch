@@ -1,5 +1,5 @@
 diff --git a/src/app_EpCfg.c b/src/app_EpCfg.c
-index 7d801f4..fadfffb 100644
+index 7d801f4..0b04c45 100644
 --- a/src/app_EpCfg.c
 +++ b/src/app_EpCfg.c
 @@ -407,6 +407,8 @@ zcl_MoistureAttr_t g_zcl_MoistureAttrs =
@@ -21,11 +21,142 @@ index 7d801f4..fadfffb 100644
  	{ ZCL_ATTRID_GLOBAL_CLUSTER_REVISION, 	ZCL_DATA_TYPE_UINT16,  	ACCESS_CONTROL_READ,  						(u8*)&zcl_attr_global_clusterRevision},
  };
  #endif
+@@ -430,6 +435,10 @@ const zcl_thermostatUICfgAttr_t g_zcl_thermostatUICfgDefault = {
+ 		.temp_offset = 0,
+ 		.humi_offset = 0,
+ 		.measureInterval = READ_SENSOR_TIMER_SEC,
++		.txpwr_mode      = 1,   // adaptive
++		.txpwr_min_dbm   = 3,   // start low
++		.txpwr_max_dbm   = 10,  // climb up to ~chip max
++		.txpwr_fixed_dbm = 10,  // used only if switched to fixed mode
+ #if	USE_DISPLAY
+ 		.TemperatureDisplayMode = 0,
+ #if SHOW_SMILEY
+@@ -464,6 +473,13 @@ const zclAttrInfo_t thermostat_ui_cfg_attrTbl[] =
+ #endif
+ 	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_MEASURE_INTERVAL,   ZCL_DATA_TYPE_UINT8,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&g_zcl_thermostatUICfgAttrs.measureInterval },
+ 
++	/* Adaptive TX power control (manufacturer-specific) */
++	{ 0x0120, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_mode },
++	{ 0x0121, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_min_dbm },
++	{ 0x0122, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_max_dbm },
++	{ 0x0123, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_fixed_dbm },
++	{ 0x0124, ZCL_DATA_TYPE_INT8,  ACCESS_CONTROL_READ | ACCESS_CONTROL_REPORTABLE, (u8*)&g_txpwr_cur_dbm },
++
+ #if USE_TRIGGER
+ 	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_TRH_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_threshold },
+ 	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_HST_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_hysteresis },
 diff --git a/src/app_main.c b/src/app_main.c
-index 938385e..6a91160 100644
+index 938385e..e85439e 100644
 --- a/src/app_main.c
 +++ b/src/app_main.c
-@@ -642,6 +642,26 @@ void user_app_init(void)
+@@ -58,6 +58,96 @@
+ /**********************************************************************
+  * GLOBAL VARIABLES
+  */
++
++/**********************************************************************
++ * Adaptive TX power control (TPC) — Stage 1: boost-on-failure
++ *
++ * Output: g_zb_txPowerSet is re-applied by the MAC on every radio power-up
++ *         (rf_reset -> rf_setTxPower), so a change survives sleep/wake.
++ * Input:  per-report APS data-confirm status (MAC_STA_NO_ACK = the parent did
++ *         not hear us) and parent-loss / rejoin events.
++ * Config: g_zcl_thermostatUICfgAttrs.txpwr_* (persisted to NV on HA write).
++ */
++extern u8 g_zb_txPowerSet;
++extern void rf_setTxPower(u8 power);
++
++static const u8 tpc_ladder[] = {
++	RF_POWER_INDEX_P3p01dBm,  // ~+3 dBm (pvvx default)
++	RF_POWER_INDEX_P4p57dBm,  // ~+5
++	RF_POWER_INDEX_P6p14dBm,  // ~+6
++	RF_POWER_INDEX_P7p79dBm,  // ~+8
++	RF_POWER_INDEX_P8p97dBm,  // ~+9
++	RF_POWER_INDEX_P9p81dBm,  // ~+10 (near chip max)
++};
++static const u8 tpc_dbm[] = { 3, 5, 6, 8, 9, 10 };
++#define TPC_N (sizeof(tpc_ladder) / sizeof(tpc_ladder[0]))
++
++u8 g_txpwr_step    = 0;
++s8 g_txpwr_cur_dbm = 3;
++static u8 tpc_failcnt = 0;
++
++static u8 tpc_step_for_dbm(u8 d){
++	u8 s = 0;
++	for(u8 i = 0; i < TPC_N; i++){
++		if(tpc_dbm[i] <= d) s = i;   // highest rung whose dBm <= requested
++	}
++	return s;
++}
++
++static void tpc_set_step(u8 step){
++	if(step >= TPC_N) step = TPC_N - 1;
++	g_txpwr_step    = step;
++	g_txpwr_cur_dbm = (s8)tpc_dbm[step];
++	g_zb_txPowerSet = tpc_ladder[step];   // re-applied by MAC across sleep/wake
++	rf_setTxPower(tpc_ladder[step]);      // apply immediately
++}
++
++void tpc_apply(void){
++	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
++	u8 mn = tpc_step_for_dbm(c->txpwr_min_dbm);
++	u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
++	if(mx < mn) mx = mn;
++	if(c->txpwr_mode == 0){               // fixed
++		tpc_set_step(tpc_step_for_dbm(c->txpwr_fixed_dbm));
++	} else {                              // adaptive: clamp current to [min,max]
++		u8 s = g_txpwr_step;
++		if(s < mn) s = mn;
++		if(s > mx) s = mx;
++		tpc_set_step(s);
++	}
++	tpc_failcnt = 0;
++}
++
++void tpc_boost_max(void){
++	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
++	if(c->txpwr_mode){                    // adaptive only
++		tpc_set_step(tpc_step_for_dbm(c->txpwr_max_dbm));
++		tpc_failcnt = 0;
++	}
++}
++
++void tpc_note_tx(u8 status){
++	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
++	if(!c->txpwr_mode) return;            // adaptive only
++	if(status == APS_STATUS_NO_ACK || status == MAC_STA_NO_ACK){
++		if(++tpc_failcnt >= 2){           // two consecutive misses -> step up
++			tpc_failcnt = 0;
++			u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
++			if(g_txpwr_step < mx) tpc_set_step(g_txpwr_step + 1);
++		}
++	} else {
++		tpc_failcnt = 0;
++	}
++}
++
++/* EP1 data-confirm: feed TPC, then chain the existing on/off retry handler. */
++void sensorDevice_dataCnfCb(void *arg){
++	apsdeDataConf_t *cnf = (apsdeDataConf_t *)arg;
++	tpc_note_tx(cnf->status);
++#if defined(ZCL_ON_OFF) && USE_RETRY_ONOFF
++	afTestOnOffCb(arg);
++#endif
++}
+ app_ctx_t g_sensorAppCtx;
+ 
+ #if ZCL_OTA_SUPPORT
+@@ -528,7 +618,7 @@ void user_app_init(void)
+ 	zcl_init(sensorDevice_zclProcessIncomingMsg);
+ 
+ 	/* Register endPoint */
+-	af_endpointRegister(SENSOR_DEVICE_ENDPOINT, (af_simple_descriptor_t *)&sensorDevice_simpleDesc, zcl_rx_handler, afTestOnOffCb);
++	af_endpointRegister(SENSOR_DEVICE_ENDPOINT, (af_simple_descriptor_t *)&sensorDevice_simpleDesc, zcl_rx_handler, sensorDevice_dataCnfCb);
+ #if (DEV_SERVICES & SERVICE_PLM)
+ 	af_endpointRegister(SENSOR_DEVICE_ENDPOINT2, (af_simple_descriptor_t *)&sensorDevice_simpleDesc2, zcl_rx_handler, NULL);
+ #endif
+@@ -642,6 +732,26 @@ void user_app_init(void)
  		REPORTABLE_SENSOR_TIMER_MAX_SEC,
  		(u8 *)&reportableChange
  	);
@@ -53,7 +184,7 @@ index 938385e..6a91160 100644
  #ifdef ZCL_RELATIVE_HUMIDITY_MEASUREMENT
      reportableChange = 50;
 diff --git a/src/app_main.h b/src/app_main.h
-index d4aab33..6658abe 100644
+index d4aab33..bad52c3 100644
 --- a/src/app_main.h
 +++ b/src/app_main.h
 @@ -120,6 +120,8 @@ typedef struct {
@@ -65,6 +196,28 @@ index d4aab33..6658abe 100644
  }zcl_MoistureAttr_t;
  
  /**
+@@ -138,8 +140,21 @@ typedef struct {
+ 	u8 display_off;
+ #endif
+ 	u8 measureInterval;
++	/* Adaptive TX power control (TPC) config — persisted via NV with the UI cfg */
++	u8 txpwr_mode;       // 0 = fixed, 1 = adaptive
++	u8 txpwr_min_dbm;    // adaptive lower bound (dBm)
++	u8 txpwr_max_dbm;    // adaptive upper bound (dBm)
++	u8 txpwr_fixed_dbm;  // level used when mode = fixed (dBm)
+ }zcl_thermostatUICfgAttr_t;
+ 
++/* Adaptive TX power control (implemented in app_main.c) */
++extern u8 g_txpwr_step;
++extern s8 g_txpwr_cur_dbm;
++void tpc_apply(void);
++void tpc_note_tx(u8 status);
++void tpc_boost_max(void);
++void sensorDevice_dataCnfCb(void *arg);
++
+ 
+ /**
+  *  @brief Defined for Occupancy cluster attributes
 diff --git a/src/board_zg303z.h b/src/board_zg303z.h
 index 61ad026..c282c54 100644
 --- a/src/board_zg303z.h
@@ -99,7 +252,7 @@ index 55f0010..5d28d66 100644
  }
  
 diff --git a/src/version_cfg.h b/src/version_cfg.h
-index 498f955..b4cbe6d 100644
+index 498f955..52566e3 100644
 --- a/src/version_cfg.h
 +++ b/src/version_cfg.h
 @@ -130,7 +130,7 @@
@@ -107,7 +260,7 @@ index 498f955..b4cbe6d 100644
  #else
  #define APP_RELEASE				0x01	//BCD app release "0.1"
 -#define APP_BUILD				0x39	//BCD app build "3.9"
-+#define APP_BUILD				0x40	//BCD app build "4.0" (Fortify release)
++#define APP_BUILD				0x41	//BCD app build "4.1" (Fortify: adaptive TX power)
  #endif
  #define STACK_RELEASE			0x30	//BCD stack release 3.0
  #define STACK_BUILD				0x01	//BCD stack build 01
@@ -123,3 +276,43 @@ index 498f955..b4cbe6d 100644
  #define	FILE_VERSION					  	((APP_RELEASE << 24) | (APP_BUILD << 16) | (STACK_RELEASE << 8) | STACK_BUILD)
  
  /* Pre-compiled link configuration. */
+diff --git a/src/zb_appCb.c b/src/zb_appCb.c
+index a19e552..4b6b0a5 100644
+--- a/src/zb_appCb.c
++++ b/src/zb_appCb.c
+@@ -150,6 +150,7 @@ void zb_bdbInitCb(u8 status, u8 joinedNetwork){
+ 		if(joinedNetwork){
+ 
+ 			set_PollRate(); // zb_setPollRate(DEFAULT_POLL_RATE);
++			tpc_apply();
+ 
+ #ifdef ZCL_OTA
+ 			ota_queryStart(OTA_PERIODIC_QUERY_INTERVAL); // 30 * 60);	// 30 m
+@@ -240,6 +241,7 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
+ 
+ 			//zb_setPollRate(POLL_RATE * 3);
+ 			set_PollRate();
++			tpc_apply();
+ 
+ #ifdef ZCL_POLL_CTRL
+ 		    sensorDevice_zclCheckInStart();
+@@ -287,6 +289,7 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
+ 		case BDB_COMMISSION_STA_NO_SCAN_RESPONSE:
+ 		case BDB_COMMISSION_STA_PARENT_LOST:
+ 			sws_puts("BDB: no scan response or parent lost\n");
++			tpc_boost_max();   // jump to max TX to re-establish the link
+ #if	USE_BLE
+ 			g_dualModeInfo.bleStart = 1;
+ #else
+diff --git a/src/zcl_appCb.c b/src/zcl_appCb.c
+index 6eb0f10..1855560 100644
+--- a/src/zcl_appCb.c
++++ b/src/zcl_appCb.c
+@@ -206,6 +206,7 @@ void sensorDevice_zclWriteReqCmd(u16 clusterId, zclWriteCmd_t *pWriteReqCmd)
+ #ifdef ZCL_THERMOSTAT_UI_CFG
+ 	if(clusterId == ZCL_CLUSTER_HAVC_USER_INTERFACE_CONFIG) {
+ 		zcl_thermostatConfig_save();
++		tpc_apply();   // re-evaluate TX power if txpwr_* changed
+ 	} else
+ #endif // ZCL_THERMOSTAT_UI_CFG
+ #ifdef ZCL_ILLUMINANCE_LEVEL_SENSING

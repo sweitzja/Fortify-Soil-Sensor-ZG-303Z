@@ -58,6 +58,96 @@
 /**********************************************************************
  * GLOBAL VARIABLES
  */
+
+/**********************************************************************
+ * Adaptive TX power control (TPC) — Stage 1: boost-on-failure
+ *
+ * Output: g_zb_txPowerSet is re-applied by the MAC on every radio power-up
+ *         (rf_reset -> rf_setTxPower), so a change survives sleep/wake.
+ * Input:  per-report APS data-confirm status (MAC_STA_NO_ACK = the parent did
+ *         not hear us) and parent-loss / rejoin events.
+ * Config: g_zcl_thermostatUICfgAttrs.txpwr_* (persisted to NV on HA write).
+ */
+extern u8 g_zb_txPowerSet;
+extern void rf_setTxPower(u8 power);
+
+static const u8 tpc_ladder[] = {
+	RF_POWER_INDEX_P3p01dBm,  // ~+3 dBm (pvvx default)
+	RF_POWER_INDEX_P4p57dBm,  // ~+5
+	RF_POWER_INDEX_P6p14dBm,  // ~+6
+	RF_POWER_INDEX_P7p79dBm,  // ~+8
+	RF_POWER_INDEX_P8p97dBm,  // ~+9
+	RF_POWER_INDEX_P9p81dBm,  // ~+10 (near chip max)
+};
+static const u8 tpc_dbm[] = { 3, 5, 6, 8, 9, 10 };
+#define TPC_N (sizeof(tpc_ladder) / sizeof(tpc_ladder[0]))
+
+u8 g_txpwr_step    = 0;
+s8 g_txpwr_cur_dbm = 3;
+static u8 tpc_failcnt = 0;
+
+static u8 tpc_step_for_dbm(u8 d){
+	u8 s = 0;
+	for(u8 i = 0; i < TPC_N; i++){
+		if(tpc_dbm[i] <= d) s = i;   // highest rung whose dBm <= requested
+	}
+	return s;
+}
+
+static void tpc_set_step(u8 step){
+	if(step >= TPC_N) step = TPC_N - 1;
+	g_txpwr_step    = step;
+	g_txpwr_cur_dbm = (s8)tpc_dbm[step];
+	g_zb_txPowerSet = tpc_ladder[step];   // re-applied by MAC across sleep/wake
+	rf_setTxPower(tpc_ladder[step]);      // apply immediately
+}
+
+void tpc_apply(void){
+	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
+	u8 mn = tpc_step_for_dbm(c->txpwr_min_dbm);
+	u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
+	if(mx < mn) mx = mn;
+	if(c->txpwr_mode == 0){               // fixed
+		tpc_set_step(tpc_step_for_dbm(c->txpwr_fixed_dbm));
+	} else {                              // adaptive: clamp current to [min,max]
+		u8 s = g_txpwr_step;
+		if(s < mn) s = mn;
+		if(s > mx) s = mx;
+		tpc_set_step(s);
+	}
+	tpc_failcnt = 0;
+}
+
+void tpc_boost_max(void){
+	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
+	if(c->txpwr_mode){                    // adaptive only
+		tpc_set_step(tpc_step_for_dbm(c->txpwr_max_dbm));
+		tpc_failcnt = 0;
+	}
+}
+
+void tpc_note_tx(u8 status){
+	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
+	if(!c->txpwr_mode) return;            // adaptive only
+	if(status == APS_STATUS_NO_ACK || status == MAC_STA_NO_ACK){
+		if(++tpc_failcnt >= 2){           // two consecutive misses -> step up
+			tpc_failcnt = 0;
+			u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
+			if(g_txpwr_step < mx) tpc_set_step(g_txpwr_step + 1);
+		}
+	} else {
+		tpc_failcnt = 0;
+	}
+}
+
+/* EP1 data-confirm: feed TPC, then chain the existing on/off retry handler. */
+void sensorDevice_dataCnfCb(void *arg){
+	apsdeDataConf_t *cnf = (apsdeDataConf_t *)arg;
+	tpc_note_tx(cnf->status);
+#if defined(ZCL_ON_OFF) && USE_RETRY_ONOFF
+	afTestOnOffCb(arg);
+#endif
+}
 app_ctx_t g_sensorAppCtx;
 
 #if ZCL_OTA_SUPPORT
@@ -528,7 +618,7 @@ void user_app_init(void)
 	zcl_init(sensorDevice_zclProcessIncomingMsg);
 
 	/* Register endPoint */
-	af_endpointRegister(SENSOR_DEVICE_ENDPOINT, (af_simple_descriptor_t *)&sensorDevice_simpleDesc, zcl_rx_handler, afTestOnOffCb);
+	af_endpointRegister(SENSOR_DEVICE_ENDPOINT, (af_simple_descriptor_t *)&sensorDevice_simpleDesc, zcl_rx_handler, sensorDevice_dataCnfCb);
 #if (DEV_SERVICES & SERVICE_PLM)
 	af_endpointRegister(SENSOR_DEVICE_ENDPOINT2, (af_simple_descriptor_t *)&sensorDevice_simpleDesc2, zcl_rx_handler, NULL);
 #endif

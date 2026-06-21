@@ -140,7 +140,20 @@ typedef struct {
 	u8 display_off;
 #endif
 	u8 measureInterval;
+	/* Adaptive TX power control (TPC) config — persisted via NV with the UI cfg */
+	u8 txpwr_mode;       // 0 = fixed, 1 = adaptive
+	u8 txpwr_min_dbm;    // adaptive lower bound (dBm)
+	u8 txpwr_max_dbm;    // adaptive upper bound (dBm)
+	u8 txpwr_fixed_dbm;  // level used when mode = fixed (dBm)
 }zcl_thermostatUICfgAttr_t;
+
+/* Adaptive TX power control (implemented in app_main.c) */
+extern u8 g_txpwr_step;
+extern s8 g_txpwr_cur_dbm;
+void tpc_apply(void);
+void tpc_note_tx(u8 status);
+void tpc_boost_max(void);
+void sensorDevice_dataCnfCb(void *arg);
 
 
 /**

@@ -1,7 +1,27 @@
 # Firmware changes vs pvvx/ZigbeeTLc
 
-All changes are in the `BOARD_ZG303Z` build, across 6 files
-(see `fortify_zg303z.patch`). Summary:
+All changes are in the `BOARD_ZG303Z` build (see `fortify_zg303z.patch`). Summary:
+
+### 0x01413001 — adaptive transmit power control (TPC)
+pvvx transmits Zigbee at only **+3 dBm** on this board (`USE_BATTERY = BATTERY_2AAA`
+→ `RF_POWER_INDEX_P3p01dBm`), ~6–8 dB quieter than stock firmware — which makes the
+unit drop off marginal routers that a stock sensor holds. Added a closed-ish loop:
+
+- **Output:** writes `g_zb_txPowerSet`, which the MAC re-applies on every radio
+  power-up (`rf_reset`), so the level survives sleep/wake.
+- **Input:** the EP1 APS data-confirm status (`MAC_STA_NO_ACK` = parent didn't hear
+  us) plus parent-loss / rejoin events.
+- **Logic (Stage 1, boost-on-failure):** climb one rung after 2 consecutive missed
+  reports; jump straight to max on parent-loss. Ladder ≈ +3/+5/+6/+8/+9/+10 dBm.
+- **Configurable** via manufacturer attributes on cluster `0x0204` (exposed by the
+  quirk): TX power **mode** (Fixed/Adaptive), **min**/**max**/**fixed** dBm, and a
+  read-only **current** dBm sensor (doubles as a placement-quality meter).
+  Defaults: Adaptive, min +3, max +10. Persisted to NV.
+
+Files: `app_main.c` (TPC module + confirm cb), `app_main.h` / `app_EpCfg.c`
+(config attrs), `zb_appCb.c` (join/parent-loss hooks), `zcl_appCb.c` (write hook).
+
+### Earlier changes (0x01403001)
 
 ### `src/version_cfg.h` — private OTA image type
 Special-cased the OTA `IMAGE_TYPE` for this board to **`0xF32C`** (instead of the

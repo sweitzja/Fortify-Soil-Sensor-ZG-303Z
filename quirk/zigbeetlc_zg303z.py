@@ -21,6 +21,13 @@ from zigpy.zcl.foundation import ZCLAttributeDef
 from zhaquirks import CustomCluster
 
 
+class TxPowerMode(t.enum8):
+    """Adaptive TX power control mode."""
+
+    Fixed = 0
+    Adaptive = 1
+
+
 class CustomUserInterfaceCluster(CustomCluster, UserInterface):
     """pvvx ZigbeeTLc config attributes on cluster 0x0204."""
 
@@ -33,6 +40,22 @@ class CustomUserInterfaceCluster(CustomCluster, UserInterface):
         )
         measurement_interval = ZCLAttributeDef(
             id=0x0107, type=t.uint8_t, access="rw", is_manufacturer_specific=True
+        )
+        # Adaptive TX power control (Fortify firmware >= 0x01413001)
+        tx_power_mode = ZCLAttributeDef(
+            id=0x0120, type=t.uint8_t, access="rw", is_manufacturer_specific=True
+        )
+        tx_power_min = ZCLAttributeDef(
+            id=0x0121, type=t.uint8_t, access="rw", is_manufacturer_specific=True
+        )
+        tx_power_max = ZCLAttributeDef(
+            id=0x0122, type=t.uint8_t, access="rw", is_manufacturer_specific=True
+        )
+        tx_power_fixed = ZCLAttributeDef(
+            id=0x0123, type=t.uint8_t, access="rw", is_manufacturer_specific=True
+        )
+        tx_power_current = ZCLAttributeDef(
+            id=0x0124, type=t.int8s, access="rp", is_manufacturer_specific=True
         )
 
 
@@ -82,6 +105,54 @@ class SoilRawCluster(CustomCluster, RelativeHumidity):
         translation_key="measurement_interval",
         fallback_name="Measurement interval",
         mode="box",
+    )
+    .enum(
+        CustomUserInterfaceCluster.AttributeDefs.tx_power_mode.name,
+        TxPowerMode,
+        CustomUserInterfaceCluster.cluster_id,
+        translation_key="tx_power_mode",
+        fallback_name="TX power mode",
+    )
+    .number(
+        CustomUserInterfaceCluster.AttributeDefs.tx_power_min.name,
+        CustomUserInterfaceCluster.cluster_id,
+        min_value=3,
+        max_value=10,
+        step=1,
+        unit="dBm",
+        translation_key="tx_power_min",
+        fallback_name="TX power min",
+        mode="box",
+    )
+    .number(
+        CustomUserInterfaceCluster.AttributeDefs.tx_power_max.name,
+        CustomUserInterfaceCluster.cluster_id,
+        min_value=3,
+        max_value=10,
+        step=1,
+        unit="dBm",
+        translation_key="tx_power_max",
+        fallback_name="TX power max",
+        mode="box",
+    )
+    .number(
+        CustomUserInterfaceCluster.AttributeDefs.tx_power_fixed.name,
+        CustomUserInterfaceCluster.cluster_id,
+        min_value=3,
+        max_value=10,
+        step=1,
+        unit="dBm",
+        translation_key="tx_power_fixed",
+        fallback_name="TX power (fixed mode)",
+        mode="box",
+    )
+    .sensor(
+        CustomUserInterfaceCluster.AttributeDefs.tx_power_current.name,
+        CustomUserInterfaceCluster.cluster_id,
+        state_class=SensorStateClass.MEASUREMENT,
+        unit="dBm",
+        translation_key="tx_power_current",
+        fallback_name="TX power current",
     )
     .sensor(
         SoilRawCluster.AttributeDefs.raw_adc.name,

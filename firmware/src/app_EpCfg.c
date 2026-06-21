@@ -435,6 +435,10 @@ const zcl_thermostatUICfgAttr_t g_zcl_thermostatUICfgDefault = {
 		.temp_offset = 0,
 		.humi_offset = 0,
 		.measureInterval = READ_SENSOR_TIMER_SEC,
+		.txpwr_mode      = 1,   // adaptive
+		.txpwr_min_dbm   = 3,   // start low
+		.txpwr_max_dbm   = 10,  // climb up to ~chip max
+		.txpwr_fixed_dbm = 10,  // used only if switched to fixed mode
 #if	USE_DISPLAY
 		.TemperatureDisplayMode = 0,
 #if SHOW_SMILEY
@@ -468,6 +472,13 @@ const zclAttrInfo_t thermostat_ui_cfg_attrTbl[] =
 	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_DISPLAY_OFF,   ZCL_DATA_TYPE_ENUM8,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&g_zcl_thermostatUICfgAttrs.display_off },
 #endif
 	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_MEASURE_INTERVAL,   ZCL_DATA_TYPE_UINT8,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&g_zcl_thermostatUICfgAttrs.measureInterval },
+
+	/* Adaptive TX power control (manufacturer-specific) */
+	{ 0x0120, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_mode },
+	{ 0x0121, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_min_dbm },
+	{ 0x0122, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_max_dbm },
+	{ 0x0123, ZCL_DATA_TYPE_UINT8, ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE,      (u8*)&g_zcl_thermostatUICfgAttrs.txpwr_fixed_dbm },
+	{ 0x0124, ZCL_DATA_TYPE_INT8,  ACCESS_CONTROL_READ | ACCESS_CONTROL_REPORTABLE, (u8*)&g_txpwr_cur_dbm },
 
 #if USE_TRIGGER
 	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_TRH_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_threshold },
