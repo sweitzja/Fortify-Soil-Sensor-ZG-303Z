@@ -98,3 +98,19 @@ index 55f0010..5d28d66 100644
  	return 1;
  }
  
+diff --git a/src/version_cfg.h b/src/version_cfg.h
+index 498f955..1960455 100644
+--- a/src/version_cfg.h
++++ b/src/version_cfg.h
+@@ -140,7 +140,11 @@
+  * Refer to ZCL OTA specification for details.
+  */
+ #define MANUFACTURER_CODE_TELINK           	0x1141	// Telink ID
++#if (BOARD == BOARD_ZG303Z)
++#define	IMAGE_TYPE							0xF32C	// Fortify private OTA image type (isolates from pvvx 1141-022c)
++#else
+ #define	IMAGE_TYPE							((CHIP_TYPE << 8) | BOARD)
++#endif
+ #define	FILE_VERSION					  	((APP_RELEASE << 24) | (APP_BUILD << 16) | (STACK_RELEASE << 8) | STACK_BUILD)
+ 
+ /* Pre-compiled link configuration. */

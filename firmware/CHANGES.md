@@ -1,7 +1,14 @@
 # Firmware changes vs pvvx/ZigbeeTLc
 
-All changes are in the `BOARD_ZG303Z` build. 33 lines added, 4 changed across 5 files
+All changes are in the `BOARD_ZG303Z` build, across 6 files
 (see `fortify_zg303z.patch`). Summary:
+
+### `src/version_cfg.h` — private OTA image type
+Special-cased the OTA `IMAGE_TYPE` for this board to **`0xF32C`** (instead of the
+default `(CHIP_TYPE<<8)|BOARD` = `0x022c`). This isolates the Fortify OTA channel
+from pvvx's generic `1141-022c` images, so neither can ever overwrite the other.
+See `docs/OTA.md`. (Requires one serial re-flash to adopt — OTA matches on the
+*running* firmware's imageType.)
 
 ### `src/board_zg303z.h` — device identity
 Renamed the ZCL Basic manufacturer/model (and BLE strings) so a flashed unit is
