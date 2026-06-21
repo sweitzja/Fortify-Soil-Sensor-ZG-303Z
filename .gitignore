@@ -11,3 +11,7 @@ Thumbs.db
 # keep intentionally-published firmware images
 !firmware/bin/
 !firmware/bin/*.bin
+
+# python
+__pycache__/
+*.pyc
