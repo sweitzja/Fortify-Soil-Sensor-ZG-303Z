@@ -7,3 +7,7 @@ build/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# keep intentionally-published firmware images
+!firmware/bin/
+!firmware/bin/*.bin
