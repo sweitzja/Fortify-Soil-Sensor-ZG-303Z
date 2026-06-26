@@ -305,9 +305,9 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
 		case BDB_COMMISSION_STA_REJOIN_FAILURE:
 			sws_puts("BDB: rejoin failure\n");
 			if(!zb_isDeviceFactoryNew()) {
-                // sleep for 10 minutes before reconnect if rejoin failed
+                // Fortify: retry rejoin every 2 min (was 10) so a moved sensor re-homes quickly
 				if(!g_sensorAppCtx.timerRejoinBackoffEvt) {
-		            g_sensorAppCtx.timerRejoinBackoffEvt = TL_ZB_TIMER_SCHEDULE(sensorDevice_rejoinBackoff, NULL, 10 * 60 * 1000);
+		            g_sensorAppCtx.timerRejoinBackoffEvt = TL_ZB_TIMER_SCHEDULE(sensorDevice_rejoinBackoff, NULL, 2 * 60 * 1000);
 				}
 			}
 #if	USE_BLE

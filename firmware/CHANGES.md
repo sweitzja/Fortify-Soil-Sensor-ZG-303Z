@@ -2,6 +2,21 @@
 
 All changes are in the `BOARD_ZG303Z` build (see `fortify_zg303z.patch`). Summary:
 
+### 0x01433001 — faster re-homing to a closer repeater
+A moved sensor was taking ~an hour (or never) to leave a far parent and rejoin a
+nearby repeater. Three knobs:
+- `ZDO_NWK_SCAN_ATTEMPTS` 1 → **3** (`zb_config.h`): each rejoin scans 3× so a
+  distant repeater's beacon is actually heard, not missed on a single pass.
+- `ZDO_MAX_PARENT_THRESHOLD_RETRY` 5 → **3** (`zb_config.h`): declare the parent
+  lost after fewer failed polls, so it commits to rejoining sooner.
+- Rejoin-failure backoff 10 min → **2 min** (`zb_appCb.c`): retry the rejoin scan
+  every 2 minutes instead of every 10 while disconnected.
+
+Trades a little extra radio-on time *while disconnected* for much faster recovery.
+Pairs with the adaptive TX power (it boosts to max on parent-loss, then these get
+it onto a new parent quickly).
+
+
 ### 0x01423001 — TX-power-current reporting
 Added a default reporting config for the current-TX-power attribute (`0x0204`/`0x0124`):
 report on any change (≥1 dBm), **3-hour heartbeat** otherwise. So `sensor.*_tx_power_current`

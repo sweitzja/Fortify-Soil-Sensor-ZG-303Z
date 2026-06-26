@@ -250,6 +250,28 @@ index 61ad026..c282c54 100644
  
  // Battery & RF Power
  #define USE_BATTERY 	BATTERY_2AAA
+diff --git a/src/includes/zb_config.h b/src/includes/zb_config.h
+index 8dbd016..5d7aea7 100644
+--- a/src/includes/zb_config.h
++++ b/src/includes/zb_config.h
+@@ -75,7 +75,7 @@
+ //Integer value representing the number of scan attempts to make before
+ //the NWK layer decides which ZigBee coordinator or router to associate with.
+ //This attribute has default value of 5 and valid values between 1 and 255.
+-#define	ZDO_NWK_SCAN_ATTEMPTS						1
++#define	ZDO_NWK_SCAN_ATTEMPTS						3	// Fortify: 3 scans per (re)join so distant repeaters are heard
+ 
+ //Integer value representing the time duration between each NWK discovery attempt described by :Config_NWK_Scan_Attempts.
+ //This attribute has a default value 0xc35 (100 milliseconds) and valid values between 1 and 65535 milliseconds.
+@@ -85,7 +85,7 @@
+ #define ZDO_NWK_INDIRECT_POLL_RATE					4 * POLL_RATE_QUARTERSECONDS //1000 ms
+ 
+ //Contents of the link retry threshold for parent link.
+-#define	ZDO_MAX_PARENT_THRESHOLD_RETRY				5
++#define	ZDO_MAX_PARENT_THRESHOLD_RETRY				3	// Fortify: declare parent lost sooner -> re-home faster
+ 
+ //Contents of the rejoin interval in seconds
+ //The number of rejoin attempts during the fast rejoin.
 diff --git a/src/sensor_rh.c b/src/sensor_rh.c
 index 55f0010..5d28d66 100644
 --- a/src/sensor_rh.c
@@ -264,7 +286,7 @@ index 55f0010..5d28d66 100644
  }
  
 diff --git a/src/version_cfg.h b/src/version_cfg.h
-index 498f955..fa3c01f 100644
+index 498f955..f58e1a8 100644
 --- a/src/version_cfg.h
 +++ b/src/version_cfg.h
 @@ -130,7 +130,7 @@
@@ -272,7 +294,7 @@ index 498f955..fa3c01f 100644
  #else
  #define APP_RELEASE				0x01	//BCD app release "0.1"
 -#define APP_BUILD				0x39	//BCD app build "3.9"
-+#define APP_BUILD				0x42	//BCD app build "4.2" (Fortify: TX power reporting)
++#define APP_BUILD				0x43	//BCD app build "4.3" (Fortify: faster re-homing)
  #endif
  #define STACK_RELEASE			0x30	//BCD stack release 3.0
  #define STACK_BUILD				0x01	//BCD stack build 01
@@ -289,7 +311,7 @@ index 498f955..fa3c01f 100644
  
  /* Pre-compiled link configuration. */
 diff --git a/src/zb_appCb.c b/src/zb_appCb.c
-index a19e552..4b6b0a5 100644
+index a19e552..69a9758 100644
 --- a/src/zb_appCb.c
 +++ b/src/zb_appCb.c
 @@ -150,6 +150,7 @@ void zb_bdbInitCb(u8 status, u8 joinedNetwork){
@@ -316,6 +338,18 @@ index a19e552..4b6b0a5 100644
  #if	USE_BLE
  			g_dualModeInfo.bleStart = 1;
  #else
+@@ -302,9 +305,9 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
+ 		case BDB_COMMISSION_STA_REJOIN_FAILURE:
+ 			sws_puts("BDB: rejoin failure\n");
+ 			if(!zb_isDeviceFactoryNew()) {
+-                // sleep for 10 minutes before reconnect if rejoin failed
++                // Fortify: retry rejoin every 2 min (was 10) so a moved sensor re-homes quickly
+ 				if(!g_sensorAppCtx.timerRejoinBackoffEvt) {
+-		            g_sensorAppCtx.timerRejoinBackoffEvt = TL_ZB_TIMER_SCHEDULE(sensorDevice_rejoinBackoff, NULL, 10 * 60 * 1000);
++		            g_sensorAppCtx.timerRejoinBackoffEvt = TL_ZB_TIMER_SCHEDULE(sensorDevice_rejoinBackoff, NULL, 2 * 60 * 1000);
+ 				}
+ 			}
+ #if	USE_BLE
 diff --git a/src/zcl_appCb.c b/src/zcl_appCb.c
 index 6eb0f10..1855560 100644
 --- a/src/zcl_appCb.c
