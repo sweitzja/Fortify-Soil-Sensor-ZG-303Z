@@ -47,7 +47,7 @@ index 7d801f4..0b04c45 100644
  	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_TRH_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_threshold },
  	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_HST_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_hysteresis },
 diff --git a/src/app_main.c b/src/app_main.c
-index 938385e..e85439e 100644
+index 938385e..c40507a 100644
 --- a/src/app_main.c
 +++ b/src/app_main.c
 @@ -58,6 +58,96 @@
@@ -156,7 +156,7 @@ index 938385e..e85439e 100644
  #if (DEV_SERVICES & SERVICE_PLM)
  	af_endpointRegister(SENSOR_DEVICE_ENDPOINT2, (af_simple_descriptor_t *)&sensorDevice_simpleDesc2, zcl_rx_handler, NULL);
  #endif
-@@ -642,6 +732,26 @@ void user_app_init(void)
+@@ -642,6 +732,38 @@ void user_app_init(void)
  		REPORTABLE_SENSOR_TIMER_MAX_SEC,
  		(u8 *)&reportableChange
  	);
@@ -178,6 +178,18 @@ index 938385e..e85439e 100644
 +		0xF001,
 +		REPORTABLE_SENSOR_TIMER_MIN_SEC,
 +		600, // 10-min heartbeat
++		(u8 *)&reportableChange
++	);
++#endif
++#ifdef ZCL_THERMOSTAT_UI_CFG
++    reportableChange = 1; // TX power current (dBm): report on any change
++	bdb_defaultReportingCfg(
++		SENSOR_DEVICE_ENDPOINT,
++		HA_PROFILE_ID,
++		ZCL_CLUSTER_HAVC_USER_INTERFACE_CONFIG,
++		0x0124,
++		REPORTABLE_SENSOR_TIMER_MIN_SEC,
++		10800, // 3-hour heartbeat even if unchanged
 +		(u8 *)&reportableChange
 +	);
  #endif
@@ -252,7 +264,7 @@ index 55f0010..5d28d66 100644
  }
  
 diff --git a/src/version_cfg.h b/src/version_cfg.h
-index 498f955..52566e3 100644
+index 498f955..fa3c01f 100644
 --- a/src/version_cfg.h
 +++ b/src/version_cfg.h
 @@ -130,7 +130,7 @@
@@ -260,7 +272,7 @@ index 498f955..52566e3 100644
  #else
  #define APP_RELEASE				0x01	//BCD app release "0.1"
 -#define APP_BUILD				0x39	//BCD app build "3.9"
-+#define APP_BUILD				0x41	//BCD app build "4.1" (Fortify: adaptive TX power)
++#define APP_BUILD				0x42	//BCD app build "4.2" (Fortify: TX power reporting)
  #endif
  #define STACK_RELEASE			0x30	//BCD stack release 3.0
  #define STACK_BUILD				0x01	//BCD stack build 01

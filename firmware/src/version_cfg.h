@@ -130,7 +130,7 @@
 #define APP_BUILD				0x16	//BCD app build "0.4"
 #else
 #define APP_RELEASE				0x01	//BCD app release "0.1"
-#define APP_BUILD				0x41	//BCD app build "4.1" (Fortify: adaptive TX power)
+#define APP_BUILD				0x42	//BCD app build "4.2" (Fortify: TX power reporting)
 #endif
 #define STACK_RELEASE			0x30	//BCD stack release 3.0
 #define STACK_BUILD				0x01	//BCD stack build 01

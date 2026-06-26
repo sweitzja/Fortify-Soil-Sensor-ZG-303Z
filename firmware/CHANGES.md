@@ -2,6 +2,12 @@
 
 All changes are in the `BOARD_ZG303Z` build (see `fortify_zg303z.patch`). Summary:
 
+### 0x01423001 — TX-power-current reporting
+Added a default reporting config for the current-TX-power attribute (`0x0204`/`0x0124`):
+report on any change (≥1 dBm), **3-hour heartbeat** otherwise. So `sensor.*_tx_power_current`
+updates on its own (no manual read), mirroring the raw-ADC heartbeat pattern.
+
+
 ### 0x01413001 — adaptive transmit power control (TPC)
 pvvx transmits Zigbee at only **+3 dBm** on this board (`USE_BATTERY = BATTERY_2AAA`
 → `RF_POWER_INDEX_P3p01dBm`), ~6–8 dB quieter than stock firmware — which makes the

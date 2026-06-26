@@ -753,6 +753,18 @@ void user_app_init(void)
 		(u8 *)&reportableChange
 	);
 #endif
+#ifdef ZCL_THERMOSTAT_UI_CFG
+    reportableChange = 1; // TX power current (dBm): report on any change
+	bdb_defaultReportingCfg(
+		SENSOR_DEVICE_ENDPOINT,
+		HA_PROFILE_ID,
+		ZCL_CLUSTER_HAVC_USER_INTERFACE_CONFIG,
+		0x0124,
+		REPORTABLE_SENSOR_TIMER_MIN_SEC,
+		10800, // 3-hour heartbeat even if unchanged
+		(u8 *)&reportableChange
+	);
+#endif
 #ifdef ZCL_RELATIVE_HUMIDITY_MEASUREMENT
     reportableChange = 50;
 	bdb_defaultReportingCfg(
