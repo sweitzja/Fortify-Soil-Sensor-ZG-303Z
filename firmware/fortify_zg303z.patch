@@ -286,7 +286,7 @@ index 55f0010..5d28d66 100644
  }
  
 diff --git a/src/version_cfg.h b/src/version_cfg.h
-index 498f955..f58e1a8 100644
+index 498f955..88373d7 100644
 --- a/src/version_cfg.h
 +++ b/src/version_cfg.h
 @@ -130,7 +130,7 @@
@@ -294,7 +294,7 @@ index 498f955..f58e1a8 100644
  #else
  #define APP_RELEASE				0x01	//BCD app release "0.1"
 -#define APP_BUILD				0x39	//BCD app build "3.9"
-+#define APP_BUILD				0x43	//BCD app build "4.3" (Fortify: faster re-homing)
++#define APP_BUILD				0x44	//BCD app build "4.4" (Fortify: end-device-timeout for routers)
  #endif
  #define STACK_RELEASE			0x30	//BCD stack release 3.0
  #define STACK_BUILD				0x01	//BCD stack build 01
@@ -311,7 +311,7 @@ index 498f955..f58e1a8 100644
  
  /* Pre-compiled link configuration. */
 diff --git a/src/zb_appCb.c b/src/zb_appCb.c
-index a19e552..69a9758 100644
+index a19e552..102c3ae 100644
 --- a/src/zb_appCb.c
 +++ b/src/zb_appCb.c
 @@ -150,6 +150,7 @@ void zb_bdbInitCb(u8 status, u8 joinedNetwork){
@@ -322,15 +322,21 @@ index a19e552..69a9758 100644
  
  #ifdef ZCL_OTA
  			ota_queryStart(OTA_PERIODIC_QUERY_INTERVAL); // 30 * 60);	// 30 m
-@@ -240,6 +241,7 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
+@@ -240,6 +241,13 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
  
  			//zb_setPollRate(POLL_RATE * 3);
  			set_PollRate();
 +			tpc_apply();
++			/* Fortify: explicitly (re)assert the End Device Timeout to our parent,
++			 * advertising BOTH keepalive methods (MAC data poll + end-dev-timeout-req),
++			 * so a router (esp. Third Reality) keeps us as a child instead of aging us
++			 * out. Symptom without this: the device only ever holds the coordinator. */
++			nwkEndDevTimeoutReqSend(NWK_ENDDEV_TIMEOUT_DEFAULT,
++				MAC_DATA_POLL_KEEPALIVE_BIT | END_DEV_TIMEOUT_REQ_KEEPALIVE_BIT);
  
  #ifdef ZCL_POLL_CTRL
  		    sensorDevice_zclCheckInStart();
-@@ -287,6 +289,7 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
+@@ -287,6 +295,7 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
  		case BDB_COMMISSION_STA_NO_SCAN_RESPONSE:
  		case BDB_COMMISSION_STA_PARENT_LOST:
  			sws_puts("BDB: no scan response or parent lost\n");
@@ -338,7 +344,7 @@ index a19e552..69a9758 100644
  #if	USE_BLE
  			g_dualModeInfo.bleStart = 1;
  #else
-@@ -302,9 +305,9 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
+@@ -302,9 +311,9 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
  		case BDB_COMMISSION_STA_REJOIN_FAILURE:
  			sws_puts("BDB: rejoin failure\n");
  			if(!zb_isDeviceFactoryNew()) {

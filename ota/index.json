@@ -1,11 +1,11 @@
 [
   {
-    "fileVersion": 21180417,
+    "fileVersion": 21245953,
     "fileSize": 133378,
     "manufacturerCode": 4417,
     "imageType": 62252,
-    "sha512": "25945e4d57031a58530de9f6d4e133d300640ead3676977026dc7534840c6373a008526abdd6fd49778ca8749a58b6ebf74382fcc7a4a498752f09a974ff5867",
+    "sha512": "7d753fe198ca7dbcaecc1ad750625aa2e0009783cebf430ee6bf526b5a9193105ba10c9c95bad20cedabd97b41198ea6fb2829b5b8182df8dfb274dbc95fb0db",
     "modelId": "Soil-Moisture",
-    "url": "https://raw.githubusercontent.com/sweitzja/Fortify-Soil-Sensor-ZG-303Z/main/ota/1141-f32c-01433001-ZG303Z.zigbee"
+    "url": "https://raw.githubusercontent.com/sweitzja/Fortify-Soil-Sensor-ZG-303Z/main/ota/1141-f32c-01443001-ZG303Z.zigbee"
   }
 ]

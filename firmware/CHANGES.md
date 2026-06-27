@@ -2,6 +2,17 @@
 
 All changes are in the `BOARD_ZG303Z` build (see `fortify_zg303z.patch`). Summary:
 
+### 0x01443001 — hold a router as parent (End-Device-Timeout / keepalive)
+Symptom: the device was only ever observed holding the **coordinator** as parent,
+never a router — so anywhere the coordinator is out of range it had no usable
+parent, while stock-firmware neighbors happily used a nearby router. On every join
+(`BDB_COMMISSION_STA_SUCCESS`) we now explicitly send an **End-Device-Timeout
+Request** advertising **both** keepalive methods (`MAC_DATA_POLL_KEEPALIVE_BIT |
+END_DEV_TIMEOUT_REQ_KEEPALIVE_BIT`) with the default 256-min timeout, so a router —
+especially a finicky Third Reality — registers and keeps us as a child instead of
+aging us out. (The NWK layer is a precompiled lib; this is the one exposed lever.)
+Field-test fix, not bench-proven.
+
 ### 0x01433001 — faster re-homing to a closer repeater
 A moved sensor was taking ~an hour (or never) to leave a far parent and rejoin a
 nearby repeater. Three knobs:

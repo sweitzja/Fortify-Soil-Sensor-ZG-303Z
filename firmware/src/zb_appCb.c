@@ -242,6 +242,12 @@ void zb_bdbCommissioningCb(u8 status, void *arg){
 			//zb_setPollRate(POLL_RATE * 3);
 			set_PollRate();
 			tpc_apply();
+			/* Fortify: explicitly (re)assert the End Device Timeout to our parent,
+			 * advertising BOTH keepalive methods (MAC data poll + end-dev-timeout-req),
+			 * so a router (esp. Third Reality) keeps us as a child instead of aging us
+			 * out. Symptom without this: the device only ever holds the coordinator. */
+			nwkEndDevTimeoutReqSend(NWK_ENDDEV_TIMEOUT_DEFAULT,
+				MAC_DATA_POLL_KEEPALIVE_BIT | END_DEV_TIMEOUT_REQ_KEEPALIVE_BIT);
 
 #ifdef ZCL_POLL_CTRL
 		    sensorDevice_zclCheckInStart();
