@@ -47,16 +47,16 @@ index 7d801f4..0b04c45 100644
  	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_TRH_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_threshold },
  	{ ZCL_THERMOSTAT_UI_CFG_ATTRID_TRIGGER_HST_T,   ZCL_DATA_TYPE_INT16,    ACCESS_CONTROL_READ | ACCESS_CONTROL_WRITE, (u8*)&trg.temp_hysteresis },
 diff --git a/src/app_main.c b/src/app_main.c
-index 938385e..c40507a 100644
+index 938385e..af08f9c 100644
 --- a/src/app_main.c
 +++ b/src/app_main.c
-@@ -58,6 +58,96 @@
+@@ -58,6 +58,116 @@
  /**********************************************************************
   * GLOBAL VARIABLES
   */
 +
 +/**********************************************************************
-+ * Adaptive TX power control (TPC) — Stage 1: boost-on-failure
++ * Adaptive TX power control (TPC) — boost-on-failure, then force-rejoin-when-stuck
 + *
 + * Output: g_zb_txPowerSet is re-applied by the MAC on every radio power-up
 + *         (rf_reset -> rf_setTxPower), so a change survives sleep/wake.
@@ -80,7 +80,9 @@ index 938385e..c40507a 100644
 +
 +u8 g_txpwr_step    = 0;
 +s8 g_txpwr_cur_dbm = 3;
-+static u8 tpc_failcnt = 0;
++extern u32 rtcSeconds;
++static u8  tpc_badscore      = 0;  // rolling bad-parent-link score (NO_ACK +2, ok -1)
++static u32 tpc_lastRejoinSec = 0;  // rtcSeconds of last forced rejoin (backoff)
 +
 +static u8 tpc_step_for_dbm(u8 d){
 +	u8 s = 0;
@@ -111,28 +113,46 @@ index 938385e..c40507a 100644
 +		if(s > mx) s = mx;
 +		tpc_set_step(s);
 +	}
-+	tpc_failcnt = 0;
++	tpc_badscore = 0;
 +}
 +
 +void tpc_boost_max(void){
 +	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
 +	if(c->txpwr_mode){                    // adaptive only
 +		tpc_set_step(tpc_step_for_dbm(c->txpwr_max_dbm));
-+		tpc_failcnt = 0;
++		tpc_badscore = 0;
 +	}
 +}
 +
 +void tpc_note_tx(u8 status){
 +	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
 +	if(!c->txpwr_mode) return;            // adaptive only
++	u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
++
 +	if(status == APS_STATUS_NO_ACK || status == MAC_STA_NO_ACK){
-+		if(++tpc_failcnt >= 2){           // two consecutive misses -> step up
-+			tpc_failcnt = 0;
-+			u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
-+			if(g_txpwr_step < mx) tpc_set_step(g_txpwr_step + 1);
-+		}
++		if(tpc_badscore < 200) tpc_badscore += 2;   // a miss hurts
 +	} else {
-+		tpc_failcnt = 0;
++		if(tpc_badscore) tpc_badscore--;            // a good tx slowly heals
++		return;
++	}
++
++	/* Link is degrading. First climb TX power; once we're maxed and it's STILL
++	 * bad, force a rejoin so the stack re-picks a parent. The NWK LQI threshold
++	 * (NWK_NEIGHBORTBL_ADD_LQITHRESHOLD) then excludes a too-weak coordinator,
++	 * which is what lets us land on a nearer router instead of clinging on. */
++	if(g_txpwr_step < mx){
++		if(tpc_badscore >= 4){
++			tpc_set_step(g_txpwr_step + 1);
++			tpc_badscore = 1;                       // let the new level prove itself
++		}
++	} else if(tpc_badscore >= 12){                  // bad even at max TX power
++		tpc_badscore = 0;
++		if(zb_isDeviceJoinedNwk()
++		   && (rtcSeconds - tpc_lastRejoinSec >= 180)){   // at most once / 3 min
++			tpc_lastRejoinSec = rtcSeconds;
++			zb_rejoinSecModeSet(REJOIN_SECURITY);
++			zb_rejoinReq(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
++		}
 +	}
 +}
 +
@@ -147,7 +167,7 @@ index 938385e..c40507a 100644
  app_ctx_t g_sensorAppCtx;
  
  #if ZCL_OTA_SUPPORT
-@@ -528,7 +618,7 @@ void user_app_init(void)
+@@ -528,7 +638,7 @@ void user_app_init(void)
  	zcl_init(sensorDevice_zclProcessIncomingMsg);
  
  	/* Register endPoint */
@@ -156,7 +176,7 @@ index 938385e..c40507a 100644
  #if (DEV_SERVICES & SERVICE_PLM)
  	af_endpointRegister(SENSOR_DEVICE_ENDPOINT2, (af_simple_descriptor_t *)&sensorDevice_simpleDesc2, zcl_rx_handler, NULL);
  #endif
-@@ -642,6 +732,38 @@ void user_app_init(void)
+@@ -642,6 +752,38 @@ void user_app_init(void)
  		REPORTABLE_SENSOR_TIMER_MAX_SEC,
  		(u8 *)&reportableChange
  	);
@@ -286,7 +306,7 @@ index 55f0010..5d28d66 100644
  }
  
 diff --git a/src/version_cfg.h b/src/version_cfg.h
-index 498f955..88373d7 100644
+index 498f955..182cba1 100644
 --- a/src/version_cfg.h
 +++ b/src/version_cfg.h
 @@ -130,7 +130,7 @@
@@ -294,7 +314,7 @@ index 498f955..88373d7 100644
  #else
  #define APP_RELEASE				0x01	//BCD app release "0.1"
 -#define APP_BUILD				0x39	//BCD app build "3.9"
-+#define APP_BUILD				0x44	//BCD app build "4.4" (Fortify: end-device-timeout for routers)
++#define APP_BUILD				0x45	//BCD app build "4.5" (Fortify: force rejoin when link stuck)
  #endif
  #define STACK_RELEASE			0x30	//BCD stack release 3.0
  #define STACK_BUILD				0x01	//BCD stack build 01

@@ -2,6 +2,18 @@
 
 All changes are in the `BOARD_ZG303Z` build (see `fortify_zg303z.patch`). Summary:
 
+### 0x01453001 — force a rejoin when stuck on a bad parent
+The device tended to cling to a weak coordinator link forever (a marginal link still
+squeaks the occasional poll through, so it never declares "parent lost," so it never
+re-selects — and the NWK LQI threshold that would exclude a too-weak coordinator only
+runs on a fresh scan). Reworked the adaptive-TX loop (`tpc_note_tx`) to track a rolling
+bad-link score (NO_ACK +2, good tx −1) instead of only consecutive misses. As the link
+degrades it climbs TX power; once it's **maxed and still failing**, it fires a
+`zb_rejoinReq()` (secured) — at most once / 3 min — to force the stack to re-pick a
+parent, where `NWK_NEIGHBORTBL_ADD_LQITHRESHOLD` (69) can drop the weak coordinator and
+let it land on a nearer router. Inert on a healthy link. Field-test fix (the rejoin's
+internal parent-pick is in the precompiled NWK lib).
+
 ### 0x01443001 — hold a router as parent (End-Device-Timeout / keepalive)
 Symptom: the device was only ever observed holding the **coordinator** as parent,
 never a router — so anywhere the coordinator is out of range it had no usable

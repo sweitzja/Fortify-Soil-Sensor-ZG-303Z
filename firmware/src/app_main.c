@@ -60,7 +60,7 @@
  */
 
 /**********************************************************************
- * Adaptive TX power control (TPC) — Stage 1: boost-on-failure
+ * Adaptive TX power control (TPC) — boost-on-failure, then force-rejoin-when-stuck
  *
  * Output: g_zb_txPowerSet is re-applied by the MAC on every radio power-up
  *         (rf_reset -> rf_setTxPower), so a change survives sleep/wake.
@@ -84,7 +84,9 @@ static const u8 tpc_dbm[] = { 3, 5, 6, 8, 9, 10 };
 
 u8 g_txpwr_step    = 0;
 s8 g_txpwr_cur_dbm = 3;
-static u8 tpc_failcnt = 0;
+extern u32 rtcSeconds;
+static u8  tpc_badscore      = 0;  // rolling bad-parent-link score (NO_ACK +2, ok -1)
+static u32 tpc_lastRejoinSec = 0;  // rtcSeconds of last forced rejoin (backoff)
 
 static u8 tpc_step_for_dbm(u8 d){
 	u8 s = 0;
@@ -115,28 +117,46 @@ void tpc_apply(void){
 		if(s > mx) s = mx;
 		tpc_set_step(s);
 	}
-	tpc_failcnt = 0;
+	tpc_badscore = 0;
 }
 
 void tpc_boost_max(void){
 	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
 	if(c->txpwr_mode){                    // adaptive only
 		tpc_set_step(tpc_step_for_dbm(c->txpwr_max_dbm));
-		tpc_failcnt = 0;
+		tpc_badscore = 0;
 	}
 }
 
 void tpc_note_tx(u8 status){
 	zcl_thermostatUICfgAttr_t *c = &g_zcl_thermostatUICfgAttrs;
 	if(!c->txpwr_mode) return;            // adaptive only
+	u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
+
 	if(status == APS_STATUS_NO_ACK || status == MAC_STA_NO_ACK){
-		if(++tpc_failcnt >= 2){           // two consecutive misses -> step up
-			tpc_failcnt = 0;
-			u8 mx = tpc_step_for_dbm(c->txpwr_max_dbm);
-			if(g_txpwr_step < mx) tpc_set_step(g_txpwr_step + 1);
-		}
+		if(tpc_badscore < 200) tpc_badscore += 2;   // a miss hurts
 	} else {
-		tpc_failcnt = 0;
+		if(tpc_badscore) tpc_badscore--;            // a good tx slowly heals
+		return;
+	}
+
+	/* Link is degrading. First climb TX power; once we're maxed and it's STILL
+	 * bad, force a rejoin so the stack re-picks a parent. The NWK LQI threshold
+	 * (NWK_NEIGHBORTBL_ADD_LQITHRESHOLD) then excludes a too-weak coordinator,
+	 * which is what lets us land on a nearer router instead of clinging on. */
+	if(g_txpwr_step < mx){
+		if(tpc_badscore >= 4){
+			tpc_set_step(g_txpwr_step + 1);
+			tpc_badscore = 1;                       // let the new level prove itself
+		}
+	} else if(tpc_badscore >= 12){                  // bad even at max TX power
+		tpc_badscore = 0;
+		if(zb_isDeviceJoinedNwk()
+		   && (rtcSeconds - tpc_lastRejoinSec >= 180)){   // at most once / 3 min
+			tpc_lastRejoinSec = rtcSeconds;
+			zb_rejoinSecModeSet(REJOIN_SECURITY);
+			zb_rejoinReq(zb_apsChannelMaskGet(), g_bdbAttrs.scanDuration);
+		}
 	}
 }
 
